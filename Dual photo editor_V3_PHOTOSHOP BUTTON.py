@@ -61,6 +61,8 @@ class ImageEditorWidget(tk.Frame):
         self.history = [self.edit_pil.copy()]
         self.redo_stack = []
 
+        self.last_mod_time = None
+
         self.zoom = 1.0
         self.img_pos_x = 0
         self.img_pos_y = 0
@@ -84,6 +86,7 @@ class ImageEditorWidget(tk.Frame):
         self.canvas.bind("<B1-Motion>", self._on_move)
         self.canvas.bind("<ButtonRelease-1>", self._on_up)
         self._render()
+        self.refresh_mod_time()
 
     def _record_state(self):
         """Record a copy of current image and transformation state for undo."""
@@ -182,7 +185,21 @@ class ImageEditorWidget(tk.Frame):
             self.edit_pil = img.copy()
             self._render()
 
-    def reload_image(self):
+    def refresh_mod_time(self):
+        try:
+            self.last_mod_time = os.path.getmtime(self.img_path)
+        except OSError:
+            self.last_mod_time = None
+
+    def check_external_update(self):
+        try:
+            current_mod = os.path.getmtime(self.img_path)
+        except OSError:
+            return
+        if self.last_mod_time is None or current_mod != self.last_mod_time:
+            self.reload_image(current_mod)
+
+    def reload_image(self, mod_time=None):
         """Reload image if edited externally (e.g., Photoshop)."""
         try:
             self.orig_pil = Image.open(self.img_path).convert("RGBA")
@@ -190,6 +207,10 @@ class ImageEditorWidget(tk.Frame):
             self.history = [self.edit_pil.copy()]
             self.redo_stack.clear()
             self._render()
+            if mod_time is None:
+                self.refresh_mod_time()
+            else:
+                self.last_mod_time = mod_time
         except Exception as e:
             print(f"Failed to reload image: {e}")
 
@@ -223,7 +244,9 @@ class DualEditor(tk.Tk):
 
         # Shortcuts
         self.bind_all("<Control-z>", lambda e: self._do("undo"))
+        self.bind_all("<Control-Z>", lambda e: self._do("undo"))
         self.bind_all("<Control-Shift-Z>", lambda e: self._do("redo"))
+        self.bind_all("<Control-Shift-z>", lambda e: self._do("redo"))
         self.bind_all("<Control-y>", lambda e: self._do("redo"))
         self.bind_all("[", lambda e: self._change_brush(-2))
         self.bind_all("]", lambda e: self._change_brush(2))
@@ -233,6 +256,8 @@ class DualEditor(tk.Tk):
         self.bind_all("*", lambda e: self._do("rotate", 5))
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
             self.bind_all(k, lambda e, dx=dx, dy=dy: self._do("move", dx, dy))
+
+        self.bind("<FocusIn>", self._check_external_updates)
 
         self._load(0)
 
@@ -275,6 +300,8 @@ class DualEditor(tk.Tk):
     def _save(self):
         self.left.edit_pil.save(self.left.img_path)
         self.right.edit_pil.save(self.right.img_path)
+        self.left.refresh_mod_time()
+        self.right.refresh_mod_time()
         messagebox.showinfo("Saved", "Images saved successfully!")
 
     def next(self):
@@ -322,6 +349,11 @@ class DualEditor(tk.Tk):
                     break
         except Exception as e:
             print(f"File watch error: {e}")
+
+    def _check_external_updates(self, event=None):
+        for editor in (self.left, self.right):
+            if editor:
+                editor.check_external_update()
 
 
 def main():
