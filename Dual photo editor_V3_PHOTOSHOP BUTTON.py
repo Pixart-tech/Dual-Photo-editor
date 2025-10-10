@@ -58,8 +58,8 @@ class ImageEditorWidget(tk.Frame):
         self.orig_pil = Image.open(img_path).convert("RGBA")
         self.edit_pil = self.orig_pil.copy()
 
-        self.history = [self.edit_pil.copy()]
-        self.redo_stack = []
+        self.history = []
+        self.history_index = -1
 
         self.last_mod_time = None
 
@@ -74,6 +74,7 @@ class ImageEditorWidget(tk.Frame):
 
         self.brush_radius = 20
         self.drawing = False
+        self._stroke_changed = False
 
         self.canvas = tk.Canvas(self, width=self.canvas_w, height=self.canvas_h, bg="#ddd", highlightthickness=0)
         self.canvas.pack(padx=10, pady=10)
@@ -87,11 +88,36 @@ class ImageEditorWidget(tk.Frame):
         self.canvas.bind("<ButtonRelease-1>", self._on_up)
         self._render()
         self.refresh_mod_time()
+        self._reset_history()
 
-    def _record_state(self):
-        """Record a copy of current image and transformation state for undo."""
-        self.history.append(self.edit_pil.copy())
-        self.redo_stack.clear()
+    def _capture_state(self):
+        return {
+            "image": self.edit_pil.copy(),
+            "rotation": self.rotation,
+            "zoom": self.zoom,
+            "img_pos_x": self.img_pos_x,
+            "img_pos_y": self.img_pos_y,
+        }
+
+    def _push_history(self):
+        state = self._capture_state()
+        if self.history_index < len(self.history) - 1:
+            self.history = self.history[: self.history_index + 1]
+        self.history.append(state)
+        self.history_index = len(self.history) - 1
+
+    def _restore_state(self, state):
+        self.edit_pil = state["image"].copy()
+        self.rotation = state["rotation"]
+        self.zoom = state["zoom"]
+        self.img_pos_x = state["img_pos_x"]
+        self.img_pos_y = state["img_pos_y"]
+        self._render()
+
+    def _reset_history(self):
+        self.history = []
+        self.history_index = -1
+        self._push_history()
 
     def _render(self):
         preview_rotated = self.edit_pil.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
@@ -130,7 +156,7 @@ class ImageEditorWidget(tk.Frame):
         self.master.focus_editor(self)
         self.drawing = True
         self.last = (e.x, e.y)
-        self._record_state()
+        self._stroke_changed = False
 
     def _on_move(self, e):
         if not self.drawing:
@@ -146,44 +172,51 @@ class ImageEditorWidget(tk.Frame):
         draw.ellipse([ix1 - r, iy1 - r, ix1 + r, iy1 + r], fill=0)
         self.edit_pil.putalpha(alpha)
         self.last = (e.x, e.y)
+        self._stroke_changed = True
         self._render()
 
     def _on_up(self, e):
+        if self.drawing and self._stroke_changed:
+            self._push_history()
         self.drawing = False
         self.last = None
+        self._stroke_changed = False
 
     def set_brush(self, r):
         self.brush_radius = max(1, r)
         self.master.update_brush_label(r)
 
     def move_by(self, dx, dy):
-        self._record_state()
+        if dx == 0 and dy == 0:
+            return
         self.img_pos_x += dx
         self.img_pos_y += dy
         self._render()
+        self._push_history()
 
     def zoom_by(self, factor):
-        self._record_state()
+        if factor == 1:
+            return
         self.zoom *= factor
         self._render()
+        self._push_history()
 
     def rotate_by(self, deg):
-        self._record_state()
+        if deg == 0:
+            return
         self.rotation = (self.rotation + deg) % 360
         self._render()
+        self._push_history()
 
     def undo(self):
-        if len(self.history) > 1:
-            self.redo_stack.append(self.history.pop())
-            self.edit_pil = self.history[-1].copy()
-            self._render()
+        if self.history_index > 0:
+            self.history_index -= 1
+            self._restore_state(self.history[self.history_index])
 
     def redo(self):
-        if self.redo_stack:
-            img = self.redo_stack.pop()
-            self.history.append(img.copy())
-            self.edit_pil = img.copy()
-            self._render()
+        if self.history_index + 1 < len(self.history):
+            self.history_index += 1
+            self._restore_state(self.history[self.history_index])
 
     def refresh_mod_time(self):
         try:
@@ -204,9 +237,8 @@ class ImageEditorWidget(tk.Frame):
         try:
             self.orig_pil = Image.open(self.img_path).convert("RGBA")
             self.edit_pil = self.orig_pil.copy()
-            self.history = [self.edit_pil.copy()]
-            self.redo_stack.clear()
             self._render()
+            self._reset_history()
             if mod_time is None:
                 self.refresh_mod_time()
             else:
@@ -216,10 +248,13 @@ class ImageEditorWidget(tk.Frame):
 
 
 class DualEditor(tk.Tk):
-    def __init__(self, pairs):
+    def __init__(self, input_folder, pairs):
         super().__init__()
         self.title("Dual Photo Editor")
         self.geometry("1600x980")
+        self.input_folder = input_folder
+        self.full_dir = os.path.join(input_folder, "FULL")
+        self.partial_dir = os.path.join(input_folder, "PARTIAL")
         self.pairs = pairs
         self.index = 0
         self.left = None
@@ -240,6 +275,7 @@ class DualEditor(tk.Tk):
         self.brush_label = tk.Label(bar, text="20", bg="#333", fg="white")
         self.brush_label.pack(side="left", padx=20)
         tk.Button(bar, text="Save", bg="#9f9", command=self._save).pack(side="left")
+        tk.Button(bar, text="Replace Original", bg="#ff6666", command=self._replace_original).pack(side="left", padx=10)
         tk.Button(bar, text="Next →", bg="#9ff", command=self.next).pack(side="right", padx=6)
 
         # Shortcuts
@@ -256,6 +292,10 @@ class DualEditor(tk.Tk):
         self.bind_all("*", lambda e: self._do("rotate", 5))
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
             self.bind_all(k, lambda e, dx=dx, dy=dy: self._do("move", dx, dy))
+
+        self.bind_all("<Return>", lambda e: self.next())
+        self.bind_all("<KP_Enter>", lambda e: self.next())
+        self.bind_all("<BackSpace>", lambda e: self.prev())
 
         self.bind("<FocusIn>", self._check_external_updates)
 
@@ -303,6 +343,59 @@ class DualEditor(tk.Tk):
         self.left.refresh_mod_time()
         self.right.refresh_mod_time()
         messagebox.showinfo("Saved", "Images saved successfully!")
+
+    def _replace_original(self):
+        if not self.focused:
+            messagebox.showerror("Error", "Select an editor first.")
+            return
+
+        editor = self.focused
+        src_path = editor.img_path
+        try:
+            editor.edit_pil.save(src_path)
+            editor.refresh_mod_time()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save image before replacing original:\n{e}")
+            return
+
+        rel_path = None
+        normalized_src = os.path.normpath(src_path)
+        normalized_src_case = os.path.normcase(normalized_src)
+        for base in (self.full_dir, self.partial_dir):
+            if not base:
+                continue
+            try:
+                normalized_base = os.path.normpath(base)
+                common = os.path.commonpath([os.path.normcase(normalized_base), normalized_src_case])
+            except ValueError:
+                continue
+            if common == os.path.normcase(normalized_base):
+                try:
+                    rel_path = os.path.relpath(normalized_src, normalized_base)
+                except ValueError:
+                    rel_path = os.path.basename(normalized_src)
+                break
+
+        if not rel_path:
+            rel_path = os.path.basename(normalized_src)
+
+        dest_path = os.path.join(ORIG_BASE, rel_path)
+        dest_dir = os.path.dirname(dest_path)
+        try:
+            if dest_dir:
+                os.makedirs(dest_dir, exist_ok=True)
+        except OSError as e:
+            if not dest_dir or not os.path.isdir(dest_dir):
+                messagebox.showerror("Error", f"Could not access original folder:\n{e}")
+                return
+
+        try:
+            shutil.copy2(src_path, dest_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to replace original:\n{e}")
+            return
+
+        messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
     def next(self):
         self._save()
@@ -374,7 +467,7 @@ def main():
     pairs = list_image_pairs(folder)
     if not pairs:
         return
-    DualEditor(pairs).mainloop()
+    DualEditor(folder, pairs).mainloop()
 
 
 if __name__ == "__main__":
