@@ -310,6 +310,14 @@ class DualEditor(tk.Tk):
         if self.index >= len(self.pairs): self.destroy(); return
         self._load(self.index)
 
+    def prev(self):
+        if self.index <= 0:
+            messagebox.showinfo("Start", "You are already at the first image pair.")
+            return
+        self._save()
+        self.index -= 1
+        self._load(self.index)
+
     # --- Photoshop Integration ---
     def _load_photoshop_path(self):
         if os.path.exists(self.photoshop_path_file):
