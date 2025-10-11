@@ -49,13 +49,7 @@ def _draw_guides(canvas, w, h, is_partial=False):
 
 class ImageEditorWidget(tk.Frame):
     def __init__(self, master, img_path, canvas_w, canvas_h):
-        super().__init__(
-            master,
-            bg="#2b2b2b",
-            highlightthickness=4,
-            highlightbackground="#2b2b2b",
-            highlightcolor="#2b2b2b",
-        )
+        super().__init__(master, bg="#2b2b2b", highlightthickness=4, highlightbackground="#2b2b2b")
         self.master = master
         self.img_path = img_path
         self.canvas_w = canvas_w
@@ -84,15 +78,7 @@ class ImageEditorWidget(tk.Frame):
         self.drawing = False
         self._stroke_changed = False
 
-        self.canvas = tk.Canvas(
-            self,
-            width=self.canvas_w,
-            height=self.canvas_h,
-            bg="#ddd",
-            highlightthickness=4,
-            highlightbackground="#2b2b2b",
-            highlightcolor="#2b2b2b",
-        )
+        self.canvas = tk.Canvas(self, width=self.canvas_w, height=self.canvas_h, bg="#ddd", highlightthickness=0)
         self.canvas.pack(padx=10, pady=10)
         self._tk_img = None
         self._cursor_id = None
@@ -105,7 +91,6 @@ class ImageEditorWidget(tk.Frame):
         self._render()
         self.refresh_mod_time()
         self._reset_history()
-        self.set_focus_highlight(False)
 
     def _capture_state(self, copy_image=True):
         return {
@@ -223,11 +208,6 @@ class ImageEditorWidget(tk.Frame):
         self.brush_radius = max(1, r)
         self.master.update_brush_label(r)
 
-    def set_focus_highlight(self, active):
-        color = "#1e90ff" if active else "#2b2b2b"
-        self.config(highlightbackground=color, highlightcolor=color)
-        self.canvas.config(highlightbackground=color, highlightcolor=color)
-
     def move_by(self, dx, dy):
         if dx == 0 and dy == 0:
             return
@@ -245,20 +225,6 @@ class ImageEditorWidget(tk.Frame):
         self.edit_pil = new_img
         self.img_pos_x = 0
         self.img_pos_y = 0
-        self._render()
-        self._push_history()
-
-    def scale_image(self, factor):
-        if factor == 1:
-            return
-        new_w = max(1, int(round(self.edit_pil.width * factor)))
-        new_h = max(1, int(round(self.edit_pil.height * factor)))
-        if new_w == self.edit_pil.width and new_h == self.edit_pil.height:
-            return
-        self.edit_pil = self.edit_pil.resize((new_w, new_h), Image.LANCZOS)
-        self.img_pos_x = 0
-        self.img_pos_y = 0
-        self.zoom = 1.0
         self._render()
         self._push_history()
 
@@ -370,9 +336,9 @@ class DualEditor(tk.Tk):
         self.bind_all("[", lambda e: self._change_brush(-2))
         self.bind_all("]", lambda e: self._change_brush(2))
         for key in ("+", "=", "<KP_Add>"):
-            self._bind_edit_key(key, "scale", 1.02)
+            self._bind_edit_key(key, "zoom", 1.02)
         for key in ("-", "_", "<KP_Subtract>"):
-            self._bind_edit_key(key, "scale", 0.98)
+            self._bind_edit_key(key, "zoom", 0.98)
         self._bind_edit_key("/", "rotate", -5)
         self._bind_edit_key("*", "rotate", 5)
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
@@ -409,10 +375,12 @@ class DualEditor(tk.Tk):
 
     def focus_editor(self, e):
         self.focused = e
-        if self.left:
-            self.left.set_focus_highlight(self.left is e)
-        if self.right:
-            self.right.set_focus_highlight(self.right is e)
+        if self.left == e:
+            self.left.config(highlightbackground="#1e90ff")
+            self.right.config(highlightbackground="#2b2b2b")
+        else:
+            self.right.config(highlightbackground="#1e90ff")
+            self.left.config(highlightbackground="#2b2b2b")
         self.update_brush_label(self.focused.brush_radius)
         if hasattr(self.focused, "canvas"):
             self.focused.canvas.focus_set()
@@ -443,7 +411,6 @@ class DualEditor(tk.Tk):
         elif action == "redo": e.redo()
         elif action == "move": e.move_by(*args)
         elif action == "zoom": e.zoom_by(args[0])
-        elif action == "scale": e.scale_image(args[0])
         elif action == "rotate": e.rotate_by(args[0])
 
     def _change_brush(self, d):
