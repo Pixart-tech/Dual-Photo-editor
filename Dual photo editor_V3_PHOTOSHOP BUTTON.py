@@ -211,24 +211,70 @@ class ImageEditorWidget(tk.Frame):
     def move_by(self, dx, dy):
         if dx == 0 and dy == 0:
             return
-        self.img_pos_x += dx
-        self.img_pos_y += dy
+        width, height = self.edit_pil.size
+        src_x0 = max(0, -dx)
+        src_y0 = max(0, -dy)
+        src_x1 = min(width, width - max(dx, 0))
+        src_y1 = min(height, height - max(dy, 0))
+
+        if src_x0 >= src_x1 or src_y0 >= src_y1:
+            self.edit_pil = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        else:
+            region = self.edit_pil.crop((src_x0, src_y0, src_x1, src_y1))
+            shifted = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            dest_x = max(0, dx)
+            dest_y = max(0, dy)
+            shifted.paste(region, (dest_x, dest_y))
+            self.edit_pil = shifted
+
+        self.img_pos_x = 0
+        self.img_pos_y = 0
+        self.zoom = 1.0
+        self.rotation = 0.0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def zoom_by(self, factor):
         if factor == 1:
             return
-        self.zoom *= factor
+        width, height = self.edit_pil.size
+        new_w = max(1, int(round(width * factor)))
+        new_h = max(1, int(round(height * factor)))
+
+        if (new_w, new_h) == (width, height):
+            if factor > 1:
+                new_w = width + 1
+                new_h = height + 1
+            else:
+                if width == 1 or height == 1:
+                    return
+                new_w = max(1, width - 1)
+                new_h = max(1, height - 1)
+
+        self.edit_pil = self.edit_pil.resize((new_w, new_h), Image.LANCZOS)
+        self.img_pos_x = 0
+        self.img_pos_y = 0
+        self.zoom = 1.0
+        self.rotation = 0.0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def rotate_by(self, deg):
         if deg == 0:
             return
-        self.rotation = (self.rotation + deg) % 360
+        rotated = self.edit_pil.rotate(
+            deg,
+            expand=True,
+            resample=Image.BICUBIC,
+            fillcolor=(0, 0, 0, 0),
+        )
+        self.edit_pil = rotated
+        self.img_pos_x = 0
+        self.img_pos_y = 0
+        self.zoom = 1.0
+        self.rotation = 0.0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def undo(self):
         if self.history_index > 0:
