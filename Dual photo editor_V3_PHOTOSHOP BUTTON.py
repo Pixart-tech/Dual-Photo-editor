@@ -231,16 +231,15 @@ class ImageEditorWidget(tk.Frame):
     def zoom_by(self, factor):
         if factor == 1:
             return
-        new_w = max(1, int(round(self.edit_pil.width * factor)))
-        new_h = max(1, int(round(self.edit_pil.height * factor)))
-        if new_w == self.edit_pil.width and new_h == self.edit_pil.height:
+        new_zoom = self.zoom * factor
+        new_zoom = max(0.1, min(new_zoom, 8.0))
+        if abs(new_zoom - self.zoom) < 1e-6:
             return
-        self.edit_pil = self.edit_pil.resize((new_w, new_h), Image.LANCZOS)
-        self.zoom = 1.0
-        self.img_pos_x = 0
-        self.img_pos_y = 0
+        self.zoom = new_zoom
         self._render()
-        self._push_history()
+        # Changing zoom should not dirty the image, but we still capture the state so
+        # undo/redo keeps track of the view changes.
+        self._push_history(mark_dirty=False, copy_image=False)
 
     def rotate_by(self, deg):
         if deg == 0:
