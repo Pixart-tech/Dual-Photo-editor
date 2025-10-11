@@ -60,6 +60,8 @@ class ImageEditorWidget(tk.Frame):
 
         self.history = []
         self.history_index = -1
+        self.saved_history_index = -1
+        self.dirty = False
 
         self.last_mod_time = None
 
@@ -99,12 +101,24 @@ class ImageEditorWidget(tk.Frame):
             "img_pos_y": self.img_pos_y,
         }
 
-    def _push_history(self):
+    def _push_history(self, mark_dirty=True):
         state = self._capture_state()
         if self.history_index < len(self.history) - 1:
             self.history = self.history[: self.history_index + 1]
         self.history.append(state)
         self.history_index = len(self.history) - 1
+        if not mark_dirty:
+            self.saved_history_index = self.history_index
+        self._update_dirty_state()
+
+    def _update_dirty_state(self):
+        self.dirty = self.history_index != self.saved_history_index
+        if hasattr(self.master, "on_editor_dirty_state"):
+            self.master.on_editor_dirty_state(self)
+
+    def mark_saved(self):
+        self.saved_history_index = self.history_index
+        self._update_dirty_state()
 
     def _restore_state(self, state):
         self.edit_pil = state["image"].copy()
@@ -117,7 +131,8 @@ class ImageEditorWidget(tk.Frame):
     def _reset_history(self):
         self.history = []
         self.history_index = -1
-        self._push_history()
+        self.saved_history_index = -1
+        self._push_history(mark_dirty=False)
 
     def _render(self):
         preview_rotated = self.edit_pil.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
@@ -212,11 +227,13 @@ class ImageEditorWidget(tk.Frame):
         if self.history_index > 0:
             self.history_index -= 1
             self._restore_state(self.history[self.history_index])
+            self._update_dirty_state()
 
     def redo(self):
         if self.history_index + 1 < len(self.history):
             self.history_index += 1
             self._restore_state(self.history[self.history_index])
+            self._update_dirty_state()
 
     def refresh_mod_time(self):
         try:
@@ -243,6 +260,7 @@ class ImageEditorWidget(tk.Frame):
                 self.refresh_mod_time()
             else:
                 self.last_mod_time = mod_time
+            self.mark_saved()
         except Exception as e:
             print(f"Failed to reload image: {e}")
 
@@ -260,6 +278,7 @@ class DualEditor(tk.Tk):
         self.left = None
         self.right = None
         self.focused = None
+        self.unsaved_changes = False
 
         self.photoshop_path_file = "photoshop_path.txt"
         self.photoshop_path = self._load_photoshop_path() or r"C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"
@@ -284,6 +303,8 @@ class DualEditor(tk.Tk):
         self.bind_all("<Control-Shift-Z>", lambda e: self._do("redo"))
         self.bind_all("<Control-Shift-z>", lambda e: self._do("redo"))
         self.bind_all("<Control-y>", lambda e: self._do("redo"))
+        self.bind_all("<Control-s>", lambda e: self._save())
+        self.bind_all("<Control-S>", lambda e: self._save())
         self.bind_all("[", lambda e: self._change_brush(-2))
         self.bind_all("]", lambda e: self._change_brush(2))
         self.bind_all("+", lambda e: self._do("zoom", 1.02))
@@ -304,6 +325,8 @@ class DualEditor(tk.Tk):
     def _load(self, i):
         if self.left: self.left.destroy()
         if self.right: self.right.destroy()
+        self.left = None
+        self.right = None
         lf, rt = self.pairs[i]
         self.left = ImageEditorWidget(self, lf, 300, 300)
         self.right = ImageEditorWidget(self, rt, 613, 713)
@@ -324,6 +347,11 @@ class DualEditor(tk.Tk):
     def update_brush_label(self, r):
         self.brush_label.config(text=str(r))
 
+    def on_editor_dirty_state(self, editor):
+        self.unsaved_changes = any(
+            ed and getattr(ed, "dirty", False) for ed in (self.left, self.right)
+        )
+
     def _do(self, action, *args):
         e = self.focused
         if not e: return
@@ -337,12 +365,41 @@ class DualEditor(tk.Tk):
         if self.focused:
             self.focused.set_brush(self.focused.brush_radius + d)
 
-    def _save(self):
-        self.left.edit_pil.save(self.left.img_path)
-        self.right.edit_pil.save(self.right.img_path)
-        self.left.refresh_mod_time()
-        self.right.refresh_mod_time()
-        messagebox.showinfo("Saved", "Images saved successfully!")
+    def _save(self, show_popup=True):
+        if not (self.left and self.right):
+            return False
+        try:
+            self.left.edit_pil.save(self.left.img_path)
+            self.right.edit_pil.save(self.right.img_path)
+            self.left.refresh_mod_time()
+            self.right.refresh_mod_time()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save images:\n{e}")
+            return False
+        self.left.mark_saved()
+        self.right.mark_saved()
+        if show_popup:
+            messagebox.showinfo("Saved", "Images saved successfully!")
+        return True
+
+    def _has_unsaved_changes(self):
+        return any(
+            ed and getattr(ed, "dirty", False) for ed in (self.left, self.right)
+        )
+
+    def _prompt_save_if_needed(self):
+        if not self._has_unsaved_changes():
+            return True
+        should_save = messagebox.askyesno(
+            "Unsaved Changes", "You have unsaved changes. Do you want to save before continuing?"
+        )
+        if should_save:
+            try:
+                return self._save(show_popup=False)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save:\n{e}")
+                return False
+        return True
 
     def _replace_original(self):
         if not self.focused:
@@ -398,7 +455,8 @@ class DualEditor(tk.Tk):
         messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
     def next(self):
-        self._save()
+        if not self._prompt_save_if_needed():
+            return
         self.index += 1
         if self.index >= len(self.pairs): self.destroy(); return
         self._load(self.index)
@@ -407,7 +465,8 @@ class DualEditor(tk.Tk):
         if self.index <= 0:
             messagebox.showinfo("Start", "You are already at the first image pair.")
             return
-        self._save()
+        if not self._prompt_save_if_needed():
+            return
         self.index -= 1
         self._load(self.index)
 
