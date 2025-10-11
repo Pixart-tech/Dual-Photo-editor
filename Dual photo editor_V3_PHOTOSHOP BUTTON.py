@@ -211,24 +211,46 @@ class ImageEditorWidget(tk.Frame):
     def move_by(self, dx, dy):
         if dx == 0 and dy == 0:
             return
-        self.img_pos_x += dx
-        self.img_pos_y += dy
+        scale = self._last_scale or 1.0
+        shift_x = int(round(dx / scale))
+        shift_y = int(round(dy / scale))
+        if shift_x == 0 and dx != 0:
+            shift_x = 1 if dx > 0 else -1
+        if shift_y == 0 and dy != 0:
+            shift_y = 1 if dy > 0 else -1
+        if shift_x == 0 and shift_y == 0:
+            return
+        new_img = Image.new("RGBA", self.edit_pil.size, (0, 0, 0, 0))
+        new_img.paste(self.edit_pil, (shift_x, shift_y))
+        self.edit_pil = new_img
+        self.img_pos_x = 0
+        self.img_pos_y = 0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def zoom_by(self, factor):
         if factor == 1:
             return
-        self.zoom *= factor
+        new_w = max(1, int(round(self.edit_pil.width * factor)))
+        new_h = max(1, int(round(self.edit_pil.height * factor)))
+        if new_w == self.edit_pil.width and new_h == self.edit_pil.height:
+            return
+        self.edit_pil = self.edit_pil.resize((new_w, new_h), Image.LANCZOS)
+        self.zoom = 1.0
+        self.img_pos_x = 0
+        self.img_pos_y = 0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def rotate_by(self, deg):
         if deg == 0:
             return
-        self.rotation = (self.rotation + deg) % 360
+        self.edit_pil = self.edit_pil.rotate(deg, expand=True, resample=Image.BICUBIC)
+        self.rotation = 0.0
+        self.img_pos_x = 0
+        self.img_pos_y = 0
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def undo(self):
         if self.history_index > 0:
