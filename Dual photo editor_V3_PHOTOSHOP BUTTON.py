@@ -78,7 +78,14 @@ class ImageEditorWidget(tk.Frame):
         self.drawing = False
         self._stroke_changed = False
 
-        self.canvas = tk.Canvas(self, width=self.canvas_w, height=self.canvas_h, bg="#ddd", highlightthickness=0)
+        self.canvas = tk.Canvas(
+            self,
+            width=self.canvas_w,
+            height=self.canvas_h,
+            bg="#ddd",
+            highlightthickness=0,
+            takefocus=1,
+        )
         self.canvas.pack(padx=10, pady=10)
         self._tk_img = None
         self._cursor_id = None
@@ -313,17 +320,17 @@ class DualEditor(tk.Tk):
 
         bar = tk.Frame(self, bg="#333")
         bar.pack(side="bottom", fill="x")
-        tk.Button(bar, text="← Prev", command=self.prev).pack(side="left", padx=6, pady=6)
-        tk.Button(bar, text="Undo (Ctrl+Z)", command=lambda: self._do("undo")).pack(side="left")
-        tk.Button(bar, text="Redo (Ctrl+Shift+Z)", command=lambda: self._do("redo")).pack(side="left")
-        tk.Button(bar, text="Open in Photoshop", bg="#ffcc66", command=self.open_in_photoshop).pack(side="left", padx=10)
-        tk.Button(bar, text="Locate Photoshop", bg="#ff9966", command=self.locate_photoshop).pack(side="left", padx=10)
+        tk.Button(bar, text="← Prev", command=self.prev, takefocus=False).pack(side="left", padx=6, pady=6)
+        tk.Button(bar, text="Undo (Ctrl+Z)", command=lambda: self._do("undo"), takefocus=False).pack(side="left")
+        tk.Button(bar, text="Redo (Ctrl+Shift+Z)", command=lambda: self._do("redo"), takefocus=False).pack(side="left")
+        tk.Button(bar, text="Open in Photoshop", bg="#ffcc66", command=self.open_in_photoshop, takefocus=False).pack(side="left", padx=10)
+        tk.Button(bar, text="Locate Photoshop", bg="#ff9966", command=self.locate_photoshop, takefocus=False).pack(side="left", padx=10)
 
         self.brush_label = tk.Label(bar, text="20", bg="#333", fg="white")
         self.brush_label.pack(side="left", padx=20)
-        tk.Button(bar, text="Save", bg="#9f9", command=self._save).pack(side="left")
-        tk.Button(bar, text="Replace Original", bg="#ff6666", command=self._replace_original).pack(side="left", padx=10)
-        tk.Button(bar, text="Next →", bg="#9ff", command=self.next).pack(side="right", padx=6)
+        tk.Button(bar, text="Save", bg="#9f9", command=self._save, takefocus=False).pack(side="left")
+        tk.Button(bar, text="Replace Original", bg="#ff6666", command=self._replace_original, takefocus=False).pack(side="left", padx=10)
+        tk.Button(bar, text="Next →", bg="#9ff", command=self.next, takefocus=False).pack(side="right", padx=6)
 
         # Shortcuts
         self.bind_all("<Control-z>", lambda e: self._do("undo"))
