@@ -192,6 +192,41 @@ class ImageEditorWidget(tk.Frame):
         self.saved_history_index = self.history_index
         self._update_dirty_state()
 
+    def _save_as_jpeg(self, img, path):
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[3])
+        background.save(path, quality=95)
+
+    def _save_as_png(self, img, path):
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        img.save(path)
+
+    def save(self):
+        target_w, target_h = self.orig_pil.size
+        rotated = self.edit_pil.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
+        base_scale = min(target_w / rotated.width, target_h / rotated.height)
+        save_scale = base_scale * self.zoom
+        new_w = max(1, int(rotated.width * save_scale))
+        new_h = max(1, int(rotated.height * save_scale))
+        scaled = rotated.resize((new_w, new_h), Image.LANCZOS)
+        pan_x_img = int(self.img_pos_x * (target_w / self.canvas_w))
+        pan_y_img = int(self.img_pos_y * (target_h / self.canvas_h))
+        final = Image.new("RGBA", (target_w, target_h), (255, 255, 255, 0))
+        x = (target_w - new_w) // 2 + pan_x_img
+        y = (target_h - new_h) // 2 + pan_y_img
+        final.paste(scaled, (x, y), scaled)
+        ext = os.path.splitext(self.img_path)[1].lower()
+        if ext in (".jpg", ".jpeg"):
+            self._save_as_jpeg(final, self.img_path)
+        elif ext == ".png":
+            self._save_as_png(final, self.img_path)
+        else:
+            final.save(self.img_path)
+        self.refresh_mod_time()
+
     def _get_history_image(self, idx):
         for i in range(idx, -1, -1):
             img = self.history[i]["image"]
@@ -500,10 +535,8 @@ class DualEditor(tk.Tk):
         if not (self.left and self.right):
             return False
         try:
-            self.left.edit_pil.save(self.left.img_path)
-            self.right.edit_pil.save(self.right.img_path)
-            self.left.refresh_mod_time()
-            self.right.refresh_mod_time()
+            self.left.save()
+            self.right.save()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save images:\n{e}")
             return False
@@ -542,8 +575,7 @@ class DualEditor(tk.Tk):
         editor = self.focused
         src_path = editor.img_path
         try:
-            editor.edit_pil.save(src_path)
-            editor.refresh_mod_time()
+            editor.save()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save image before replacing original:\n{e}")
             return
