@@ -105,6 +105,61 @@ class ImageEditorWidget(tk.Frame):
         self.refresh_mod_time()
         self._reset_history()
 
+    def export_state(self):
+        history_copy = []
+        for entry in self.history:
+            image_ref = entry["image"]
+            history_copy.append(
+                {
+                    "image": image_ref.copy() if image_ref is not None else None,
+                    "rotation": entry["rotation"],
+                    "zoom": entry["zoom"],
+                    "img_pos_x": entry["img_pos_x"],
+                    "img_pos_y": entry["img_pos_y"],
+                }
+            )
+        return {
+            "edit_pil": self.edit_pil.copy(),
+            "history": history_copy,
+            "history_index": self.history_index,
+            "saved_history_index": self.saved_history_index,
+            "zoom": self.zoom,
+            "img_pos_x": self.img_pos_x,
+            "img_pos_y": self.img_pos_y,
+            "rotation": self.rotation,
+            "brush_radius": self.brush_radius,
+            "dirty": self.dirty,
+            "last_mod_time": self.last_mod_time,
+        }
+
+    def restore_state(self, state):
+        if not state:
+            return
+        self.edit_pil = state["edit_pil"].copy()
+        self.history = []
+        for entry in state.get("history", []):
+            image_ref = entry.get("image")
+            self.history.append(
+                {
+                    "image": image_ref.copy() if image_ref is not None else None,
+                    "rotation": entry.get("rotation", 0.0),
+                    "zoom": entry.get("zoom", 1.0),
+                    "img_pos_x": entry.get("img_pos_x", 0),
+                    "img_pos_y": entry.get("img_pos_y", 0),
+                }
+            )
+        self.history_index = state.get("history_index", len(self.history) - 1)
+        self.saved_history_index = state.get("saved_history_index", -1)
+        self.zoom = state.get("zoom", 1.0)
+        self.img_pos_x = state.get("img_pos_x", 0)
+        self.img_pos_y = state.get("img_pos_y", 0)
+        self.rotation = state.get("rotation", 0.0)
+        self.brush_radius = state.get("brush_radius", self.brush_radius)
+        self.dirty = state.get("dirty", self.history_index != self.saved_history_index)
+        self.last_mod_time = state.get("last_mod_time", self.last_mod_time)
+        self._render()
+        self._update_dirty_state()
+
     def set_focus_state(self, focused):
         color = "#1e90ff" if focused else "#2b2b2b"
         self.config(highlightbackground=color, highlightcolor=color)
@@ -306,6 +361,8 @@ class ImageEditorWidget(tk.Frame):
             else:
                 self.last_mod_time = mod_time
             self.mark_saved()
+            if hasattr(self.master, "clear_cached_state"):
+                self.master.clear_cached_state(self.img_path)
         except Exception as e:
             print(f"Failed to reload image: {e}")
 
@@ -324,6 +381,7 @@ class DualEditor(tk.Tk):
         self.right = None
         self.focused = None
         self.unsaved_changes = False
+        self._editor_states = {}
 
         self.photoshop_path_file = "photoshop_path.txt"
         self.photoshop_path = self._load_photoshop_path() or r"C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"
@@ -379,8 +437,10 @@ class DualEditor(tk.Tk):
         self.bind_all(sequence, handler)
 
     def _load(self, i):
-        if self.left: self.left.destroy()
-        if self.right: self.right.destroy()
+        for editor in (self.left, self.right):
+            self._cache_editor_state(editor)
+            if editor:
+                editor.destroy()
         self.left = None
         self.right = None
         lf, rt = self.pairs[i]
@@ -388,7 +448,9 @@ class DualEditor(tk.Tk):
         self.right = ImageEditorWidget(self, rt, 613, 713)
         self.left.pack(side="left", expand=True, padx=20, pady=20)
         self.right.pack(side="right", expand=True, padx=20, pady=20)
-        self.focus_editor(self.left)
+        self._restore_editor_state(self.left)
+        self._restore_editor_state(self.right)
+        self.focus_editor(self.left if self.left else self.right)
 
     def focus_editor(self, e):
         self.focused = e
@@ -396,6 +458,8 @@ class DualEditor(tk.Tk):
             self.left.set_focus_state(self.left is e)
         if self.right:
             self.right.set_focus_state(self.right is e)
+        if not self.focused:
+            return
         self.update_brush_label(self.focused.brush_radius)
         if hasattr(self.focused, "canvas"):
             self.focused.canvas.focus_set()
@@ -445,6 +509,8 @@ class DualEditor(tk.Tk):
             return False
         self.left.mark_saved()
         self.right.mark_saved()
+        self._cache_editor_state(self.left)
+        self._cache_editor_state(self.right)
         if show_popup:
             messagebox.showinfo("Saved", "Images saved successfully!")
         return True
@@ -581,6 +647,27 @@ class DualEditor(tk.Tk):
         for editor in (self.left, self.right):
             if editor:
                 editor.check_external_update()
+
+    def _cache_editor_state(self, editor):
+        if not editor or not getattr(editor, "img_path", None):
+            return
+        try:
+            self._editor_states[editor.img_path] = editor.export_state()
+        except Exception as exc:
+            print(f"Failed to cache editor state for {editor.img_path}: {exc}")
+
+    def _restore_editor_state(self, editor):
+        if not editor or not getattr(editor, "img_path", None):
+            return
+        state = self._editor_states.get(editor.img_path)
+        if state:
+            try:
+                editor.restore_state(state)
+            except Exception as exc:
+                print(f"Failed to restore editor state for {editor.img_path}: {exc}")
+
+    def clear_cached_state(self, path):
+        self._editor_states.pop(path, None)
 
 
 def main():
