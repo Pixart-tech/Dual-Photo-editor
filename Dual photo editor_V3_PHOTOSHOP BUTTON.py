@@ -92,17 +92,17 @@ class ImageEditorWidget(tk.Frame):
         self.refresh_mod_time()
         self._reset_history()
 
-    def _capture_state(self, copy_image=True):
+    def _capture_state(self):
         return {
-            "image": self.edit_pil.copy() if copy_image else None,
+            "image": self.edit_pil.copy(),
             "rotation": self.rotation,
             "zoom": self.zoom,
             "img_pos_x": self.img_pos_x,
             "img_pos_y": self.img_pos_y,
         }
 
-    def _push_history(self, mark_dirty=True, copy_image=True):
-        state = self._capture_state(copy_image=copy_image)
+    def _push_history(self, mark_dirty=True):
+        state = self._capture_state()
         if self.history_index < len(self.history) - 1:
             self.history = self.history[: self.history_index + 1]
         self.history.append(state)
@@ -120,15 +120,8 @@ class ImageEditorWidget(tk.Frame):
         self.saved_history_index = self.history_index
         self._update_dirty_state()
 
-    def _get_history_image(self, idx):
-        for i in range(idx, -1, -1):
-            img = self.history[i]["image"]
-            if img is not None:
-                return img.copy()
-        return self.edit_pil.copy()
-
-    def _restore_state(self, state, idx):
-        self.edit_pil = self._get_history_image(idx)
+    def _restore_state(self, state):
+        self.edit_pil = state["image"].copy()
         self.rotation = state["rotation"]
         self.zoom = state["zoom"]
         self.img_pos_x = state["img_pos_x"]
@@ -139,7 +132,7 @@ class ImageEditorWidget(tk.Frame):
         self.history = []
         self.history_index = -1
         self.saved_history_index = -1
-        self._push_history(mark_dirty=False, copy_image=True)
+        self._push_history(mark_dirty=False)
 
     def _render(self):
         preview_rotated = self.edit_pil.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
@@ -214,32 +207,32 @@ class ImageEditorWidget(tk.Frame):
         self.img_pos_x += dx
         self.img_pos_y += dy
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def zoom_by(self, factor):
         if factor == 1:
             return
         self.zoom *= factor
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def rotate_by(self, deg):
         if deg == 0:
             return
         self.rotation = (self.rotation + deg) % 360
         self._render()
-        self._push_history(copy_image=False)
+        self._push_history()
 
     def undo(self):
         if self.history_index > 0:
             self.history_index -= 1
-            self._restore_state(self.history[self.history_index], self.history_index)
+            self._restore_state(self.history[self.history_index])
             self._update_dirty_state()
 
     def redo(self):
         if self.history_index + 1 < len(self.history):
             self.history_index += 1
-            self._restore_state(self.history[self.history_index], self.history_index)
+            self._restore_state(self.history[self.history_index])
             self._update_dirty_state()
 
     def refresh_mod_time(self):
@@ -314,10 +307,8 @@ class DualEditor(tk.Tk):
         self.bind_all("<Control-S>", lambda e: self._save())
         self.bind_all("[", lambda e: self._change_brush(-2))
         self.bind_all("]", lambda e: self._change_brush(2))
-        for key in ("+", "=", "<KP_Add>"):
-            self.bind_all(key, lambda e, factor=1.02: self._do("zoom", factor))
-        for key in ("-", "_", "<KP_Subtract>"):
-            self.bind_all(key, lambda e, factor=0.98: self._do("zoom", factor))
+        self.bind_all("+", lambda e: self._do("zoom", 1.02))
+        self.bind_all("-", lambda e: self._do("zoom", 0.98))
         self.bind_all("/", lambda e: self._do("rotate", -5))
         self.bind_all("*", lambda e: self._do("rotate", 5))
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
@@ -326,8 +317,6 @@ class DualEditor(tk.Tk):
         self.bind_all("<Return>", lambda e: self.next())
         self.bind_all("<KP_Enter>", lambda e: self.next())
         self.bind_all("<BackSpace>", lambda e: self.prev())
-        self.bind_all("<Tab>", self._toggle_dashboard_focus)
-        self.bind_all("<ISO_Left_Tab>", self._toggle_dashboard_focus)
 
         self.bind("<FocusIn>", self._check_external_updates)
 
@@ -354,22 +343,9 @@ class DualEditor(tk.Tk):
             self.right.config(highlightbackground="#1e90ff")
             self.left.config(highlightbackground="#2b2b2b")
         self.update_brush_label(self.focused.brush_radius)
-        if hasattr(self.focused, "canvas"):
-            self.focused.canvas.focus_set()
 
     def update_brush_label(self, r):
         self.brush_label.config(text=str(r))
-
-    def _toggle_dashboard_focus(self, event=None):
-        if self.left and self.right:
-            next_editor = self.right if self.focused is self.left else self.left
-        elif self.left or self.right:
-            next_editor = self.left or self.right
-        else:
-            return "break"
-        if next_editor:
-            self.focus_editor(next_editor)
-        return "break"
 
     def on_editor_dirty_state(self, editor):
         self.unsaved_changes = any(
