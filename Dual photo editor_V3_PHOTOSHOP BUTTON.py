@@ -316,21 +316,7 @@ class ImageEditorWidget(tk.Frame):
     def rotate_by(self, deg):
         if deg == 0:
             return
-        prev_w, prev_h = self.edit_pil.size
-        prev_base_scale = min(
-            self.canvas_w / prev_w if prev_w else 1,
-            self.canvas_h / prev_h if prev_h else 1,
-        )
         self.edit_pil = self.edit_pil.rotate(deg, expand=True, resample=Image.BICUBIC)
-        new_w, new_h = self.edit_pil.size
-        new_base_scale = min(
-            self.canvas_w / new_w if new_w else 1,
-            self.canvas_h / new_h if new_h else 1,
-        )
-        if new_base_scale > 0:
-            ratio = prev_base_scale / new_base_scale
-            new_zoom = max(0.1, min(self.zoom * ratio, 8.0))
-            self.zoom = new_zoom
         self.rotation = 0.0
         self.img_pos_x = 0
         self.img_pos_y = 0
