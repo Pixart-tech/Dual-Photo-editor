@@ -423,7 +423,7 @@ class DualEditor(tk.Tk):
         self.bind_all("<KP_Enter>", lambda e: self.next())
         self.bind_all("<BackSpace>", lambda e: self.prev())
         self.bind_all("<Tab>", self._toggle_dashboard_focus)
-        self.bind_all("<ISO_Left_Tab>", self._toggle_dashboard_focus)
+        self.bind_all("<Shift-Tab>", self._toggle_dashboard_focus)
 
         self.bind("<FocusIn>", self._check_external_updates)
 
@@ -685,3 +685,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
