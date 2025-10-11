@@ -49,7 +49,13 @@ def _draw_guides(canvas, w, h, is_partial=False):
 
 class ImageEditorWidget(tk.Frame):
     def __init__(self, master, img_path, canvas_w, canvas_h):
-        super().__init__(master, bg="#2b2b2b", highlightthickness=4, highlightbackground="#2b2b2b")
+        super().__init__(
+            master,
+            bg="#2b2b2b",
+            highlightthickness=4,
+            highlightbackground="#2b2b2b",
+            highlightcolor="#2b2b2b",
+        )
         self.master = master
         self.img_path = img_path
         self.canvas_w = canvas_w
@@ -98,6 +104,10 @@ class ImageEditorWidget(tk.Frame):
         self._render()
         self.refresh_mod_time()
         self._reset_history()
+
+    def set_focus_state(self, focused):
+        color = "#1e90ff" if focused else "#2b2b2b"
+        self.config(highlightbackground=color, highlightcolor=color)
 
     def _capture_state(self, copy_image=True):
         return {
@@ -382,12 +392,10 @@ class DualEditor(tk.Tk):
 
     def focus_editor(self, e):
         self.focused = e
-        if self.left == e:
-            self.left.config(highlightbackground="#1e90ff")
-            self.right.config(highlightbackground="#2b2b2b")
-        else:
-            self.right.config(highlightbackground="#1e90ff")
-            self.left.config(highlightbackground="#2b2b2b")
+        if self.left:
+            self.left.set_focus_state(self.left is e)
+        if self.right:
+            self.right.set_focus_state(self.right is e)
         self.update_brush_label(self.focused.brush_radius)
         if hasattr(self.focused, "canvas"):
             self.focused.canvas.focus_set()
