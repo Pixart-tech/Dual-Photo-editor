@@ -465,8 +465,8 @@ class DualEditor(tk.Tk):
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
             self._bind_edit_key(k, "move", dx, dy)
 
-        self.bind_all("<Return>", lambda e: self.next())
-        self.bind_all("<KP_Enter>", lambda e: self.next())
+        self.bind_all("<Return>", self._handle_enter_press)
+        self.bind_all("<KP_Enter>", self._handle_enter_press)
         self.bind_all("<BackSpace>", lambda e: self.prev())
         self.bind_all("<Tab>", self._toggle_dashboard_focus)
         self.bind_all("<Shift-Tab>", self._toggle_dashboard_focus)
@@ -632,8 +632,14 @@ class DualEditor(tk.Tk):
 
         messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
-    def next(self):
+    def _handle_enter_press(self, event=None):
         if not self._prompt_save_if_needed():
+            return "break"
+        self.next(prompt=False)
+        return "break"
+
+    def next(self, event=None, *, prompt=True):
+        if prompt and not self._prompt_save_if_needed():
             return
         self.index += 1
         if self.index >= len(self.pairs): self.destroy(); return
