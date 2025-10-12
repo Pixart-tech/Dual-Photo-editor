@@ -19,6 +19,20 @@ def list_image_pairs(input_folder):
         messagebox.showerror("Error", "Input folder must contain FULL and PARTIAL subfolders.")
         return []
 
+    edited_root = os.path.join(input_folder, "EDITED")
+    edited_full_dir = os.path.join(edited_root, "FULL")
+    edited_partial_dir = os.path.join(edited_root, "PARTIAL")
+
+    try:
+        os.makedirs(edited_full_dir, exist_ok=True)
+        os.makedirs(edited_partial_dir, exist_ok=True)
+    except OSError as exc:
+        messagebox.showerror(
+            "Error",
+            f"Could not create or access EDITED folders:\n{exc}",
+        )
+        return []
+
     full_files = {
         os.path.splitext(f)[0]: os.path.join(full_dir, f)
         for f in os.listdir(full_dir)
@@ -30,7 +44,35 @@ def list_image_pairs(input_folder):
         if f.lower().endswith(IMAGE_EXTS)
     }
     common = sorted(set(full_files.keys()) & set(partial_files.keys()))
-    return [(full_files[name], partial_files[name]) for name in common]
+
+    def _prepare_destination(src_path, destination_dir):
+        filename = os.path.basename(src_path)
+        dest_path = os.path.join(destination_dir, filename)
+        if not os.path.exists(dest_path):
+            try:
+                shutil.copy2(src_path, dest_path)
+            except OSError as exc:
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to prepare edited copy for {filename}:\n{exc}",
+                )
+                return None
+        return dest_path
+
+    pairs = []
+    for name in common:
+        full_src = full_files[name]
+        partial_src = partial_files[name]
+        full_dest = _prepare_destination(full_src, edited_full_dir)
+        partial_dest = _prepare_destination(partial_src, edited_partial_dir)
+        if not full_dest or not partial_dest:
+            continue
+        pairs.append((full_dest, partial_dest))
+
+    if not pairs:
+        messagebox.showinfo("No Images", "No matching image pairs were found.")
+
+    return pairs
 
 
 def _draw_guides(canvas, w, h, is_partial=False):
@@ -408,8 +450,9 @@ class DualEditor(tk.Tk):
         self.title("Dual Photo Editor")
         self.geometry("1600x980")
         self.input_folder = input_folder
-        self.full_dir = os.path.join(input_folder, "FULL")
-        self.partial_dir = os.path.join(input_folder, "PARTIAL")
+        self.edited_root = os.path.join(input_folder, "EDITED")
+        self.full_dir = os.path.join(self.edited_root, "FULL")
+        self.partial_dir = os.path.join(self.edited_root, "PARTIAL")
         self.pairs = pairs
         self.index = 0
         self.left = None
