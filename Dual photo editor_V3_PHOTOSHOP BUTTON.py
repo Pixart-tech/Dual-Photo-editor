@@ -363,9 +363,13 @@ class ImageEditorWidget(tk.Frame):
     def rotate_by(self, deg):
         if deg == 0:
             return
-        self.rotation = (self.rotation + deg) % 360
+        # Apply the rotation in-memory so changes are only persisted when the user saves manually.
+        self.edit_pil = self.edit_pil.rotate(deg, expand=True, resample=Image.BICUBIC)
+        self.rotation = 0.0
+        self.img_pos_x = 0
+        self.img_pos_y = 0
         self._render()
-        self._push_history(mark_dirty=True, copy_image=False)
+        self._push_history()
 
     def undo(self):
         if self.history_index > 0:
