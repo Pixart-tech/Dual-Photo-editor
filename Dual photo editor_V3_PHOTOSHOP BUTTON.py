@@ -361,6 +361,7 @@ class ImageEditorWidget(tk.Frame):
     def rotate_by(self, deg):
         if deg == 0:
             return
+        # Apply the rotation in-memory so changes are only persisted when the user saves manually.
         self.edit_pil = self.edit_pil.rotate(deg, expand=True, resample=Image.BICUBIC)
         self.rotation = 0.0
         self.img_pos_x = 0
@@ -566,15 +567,17 @@ class DualEditor(tk.Tk):
     def _prompt_save_if_needed(self):
         if not self._has_unsaved_changes():
             return True
-        should_save = messagebox.askyesno(
-            "Unsaved Changes", "You have unsaved changes. Do you want to save before continuing?"
+        response = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            (
+                "You have unsaved edits. Press Ctrl+S or click the Save button to write them "
+                "before continuing.\n\nSave now?"
+            ),
         )
-        if should_save:
-            try:
-                return self._save(show_popup=False)
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save:\n{e}")
-                return False
+        if response is None:
+            return False
+        if response:
+            return self._save(show_popup=False)
         return True
 
     def _replace_original(self):
