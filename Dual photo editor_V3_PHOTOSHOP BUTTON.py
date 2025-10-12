@@ -354,9 +354,11 @@ class ImageEditorWidget(tk.Frame):
             return
         self.zoom = new_zoom
         self._render()
-        # Changing zoom should not dirty the image, but we still capture the state so
-        # undo/redo keeps track of the view changes.
-        self._push_history(mark_dirty=False, copy_image=False)
+        # Zoom adjustments affect the final saved output, so they must mark the
+        # editor as dirty in order to trigger save prompts (e.g., when pressing
+        # Enter to advance). We still avoid copying image data because the pixel
+        # content hasn't changed.
+        self._push_history(mark_dirty=True, copy_image=False)
 
     def rotate_by(self, deg):
         if deg == 0:
