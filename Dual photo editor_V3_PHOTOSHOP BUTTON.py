@@ -564,15 +564,22 @@ class DualEditor(tk.Tk):
             ed and getattr(ed, "dirty", False) for ed in (self.left, self.right)
         )
 
-    def _prompt_save_if_needed(self):
+    def _prompt_save_if_needed(self, *, reason=None):
         if not self._has_unsaved_changes():
             return True
-        response = messagebox.askyesnocancel(
-            "Unsaved Changes",
-            (
+        if reason == "enter":
+            prompt_message = (
+                "You pressed Enter without saving your latest edits.\n\n"
+                "Would you like to save them before moving to the next pair?"
+            )
+        else:
+            prompt_message = (
                 "You have unsaved edits. Press Ctrl+S or click the Save button to write them "
                 "before continuing.\n\nSave now?"
-            ),
+            )
+        response = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            prompt_message,
         )
         if response is None:
             return False
@@ -633,7 +640,7 @@ class DualEditor(tk.Tk):
         messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
     def _handle_enter_press(self, event=None):
-        if not self._prompt_save_if_needed():
+        if not self._prompt_save_if_needed(reason="enter"):
             return "break"
         self.next(prompt=False)
         return "break"
