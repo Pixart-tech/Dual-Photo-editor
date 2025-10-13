@@ -601,20 +601,46 @@ class DualEditor(tk.Tk):
         rel_path = None
         normalized_src = os.path.normpath(src_path)
         normalized_src_case = os.path.normcase(normalized_src)
-        for base in (self.full_dir, self.partial_dir):
-            if not base:
-                continue
+
+        preferred_rel = None
+        normalized_input = getattr(self, "input_folder", None)
+        if normalized_input:
+            normalized_input = os.path.normpath(normalized_input)
+            input_parent = os.path.dirname(normalized_input)
             try:
-                normalized_base = os.path.normpath(base)
-                common = os.path.commonpath([os.path.normcase(normalized_base), normalized_src_case])
+                rel_to_parent = os.path.relpath(normalized_src, input_parent)
             except ValueError:
-                continue
-            if common == os.path.normcase(normalized_base):
+                rel_to_parent = None
+            if rel_to_parent and not rel_to_parent.startswith(".."):
+                parts = rel_to_parent.split(os.sep)
+                filtered_parts = []
+                skipped = False
+                for part in parts:
+                    lower_part = part.lower()
+                    if not skipped and lower_part in ("full", "partial"):
+                        skipped = True
+                        continue
+                    filtered_parts.append(part)
+                if filtered_parts:
+                    preferred_rel = os.path.join(*filtered_parts)
+
+        if preferred_rel:
+            rel_path = preferred_rel
+        else:
+            for base in (self.full_dir, self.partial_dir):
+                if not base:
+                    continue
                 try:
-                    rel_path = os.path.relpath(normalized_src, normalized_base)
+                    normalized_base = os.path.normpath(base)
+                    common = os.path.commonpath([os.path.normcase(normalized_base), normalized_src_case])
                 except ValueError:
-                    rel_path = os.path.basename(normalized_src)
-                break
+                    continue
+                if common == os.path.normcase(normalized_base):
+                    try:
+                        rel_path = os.path.relpath(normalized_src, normalized_base)
+                    except ValueError:
+                        rel_path = os.path.basename(normalized_src)
+                    break
 
         if not rel_path:
             rel_path = os.path.basename(normalized_src)
