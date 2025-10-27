@@ -350,21 +350,20 @@ class ImageEditorWidget(tk.Frame):
         if factor == 1:
             return
         new_zoom = self.zoom * factor
-        new_zoom = max(0.1, min(new_zoom, 8.0))
+        new_zoom = max(0.1, min(new_zoom, 10.0))
         if abs(new_zoom - self.zoom) < 1e-6:
             return
         self.zoom = new_zoom
         self._render()
-        # Zoom adjustments affect the final saved output, so they must mark the
-        # editor as dirty in order to trigger save prompts (e.g., when pressing
-        # Enter to advance). We still avoid copying image data because the pixel
-        # content hasn't changed.
-        self._push_history(mark_dirty=True, copy_image=False)
+        self._push_history(copy_image=False)
 
     def rotate_by(self, deg):
         if deg == 0:
             return
-        self.rotation = (self.rotation + deg) % 360
+        self.edit_pil = self.edit_pil.rotate(deg, expand=True, resample=Image.BICUBIC)
+        self.rotation = 0.0
+        self.img_pos_x = 0
+        self.img_pos_y = 0
         self._render()
         self._push_history()
 
@@ -406,8 +405,6 @@ class ImageEditorWidget(tk.Frame):
             else:
                 self.last_mod_time = mod_time
             self.mark_saved()
-            if hasattr(self.master, "clear_cached_state"):
-                self.master.clear_cached_state(self.img_path)
         except Exception as e:
             print(f"Failed to reload image: {e}")
 
@@ -426,7 +423,6 @@ class DualEditor(tk.Tk):
         self.right = None
         self.focused = None
         self.unsaved_changes = False
-        self._editor_states = {}
 
         self.photoshop_path_file = "photoshop_path.txt"
         self.photoshop_path = self._load_photoshop_path() or r"C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"
