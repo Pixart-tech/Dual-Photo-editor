@@ -29,6 +29,7 @@ def list_image_pairs(input_folder):
         for f in os.listdir(partial_dir)
         if f.lower().endswith(IMAGE_EXTS)
     }
+
     common = sorted(set(full_files.keys()) & set(partial_files.keys()))
 
     pairs = []
@@ -458,8 +459,8 @@ class DualEditor(tk.Tk):
             self._bind_edit_key(key, "zoom", 1.02)
         for key in ("-", "_", "<KP_Subtract>"):
             self._bind_edit_key(key, "zoom", 0.98)
-        self._bind_edit_key("/", "rotate", -5)
-        self._bind_edit_key("*", "rotate", 5)
+        self._bind_edit_key("/", "rotate", -3)
+        self._bind_edit_key("*", "rotate", 3)
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
             self._bind_edit_key(k, "move", dx, dy)
 
@@ -468,6 +469,10 @@ class DualEditor(tk.Tk):
         self.bind_all("<BackSpace>", lambda e: self.prev())
         self.bind_all("<Tab>", self._toggle_dashboard_focus)
         self.bind_all("<Shift-Tab>", self._toggle_dashboard_focus)
+        self.bind_all("<Shift-plus>", lambda e: self._do("zoom", 1.10))
+        self.bind_all("<Shift-KP_Add>", lambda e: self._do("zoom", 1.10))
+        self.bind_all("<Shift-minus>", lambda e: self._do("zoom", 0.90))
+        self.bind_all("<Shift-KP_Subtract>", lambda e: self._do("zoom", 0.90))
 
         self.bind("<FocusIn>", self._check_external_updates)
 
@@ -597,6 +602,12 @@ class DualEditor(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save image before replacing original:\n{e}")
             return
+        
+        main_dir = os.path.basename(self.input_folder)
+        file_name = os.path.splitext(os.path.basename(src_path))[0]
+
+        """
+        dest_path = os.path.join(ORIG_BASE, main_dir)
 
         rel_path = None
         normalized_src = os.path.normpath(src_path)
@@ -607,6 +618,8 @@ class DualEditor(tk.Tk):
             try:
                 normalized_base = os.path.normpath(base)
                 common = os.path.commonpath([os.path.normcase(normalized_base), normalized_src_case])
+                
+                print(f"Checking base: {common} against {normalized_base}")
             except ValueError:
                 continue
             if common == os.path.normcase(normalized_base):
@@ -621,19 +634,25 @@ class DualEditor(tk.Tk):
 
         dest_path = os.path.join(ORIG_BASE, rel_path)
         dest_dir = os.path.dirname(dest_path)
-        try:
-            if dest_dir:
-                os.makedirs(dest_dir, exist_ok=True)
-        except OSError as e:
-            if not dest_dir or not os.path.isdir(dest_dir):
-                messagebox.showerror("Error", f"Could not access original folder:\n{e}")
-                return
+        
+        """
+        dest_dir = os.path.join(ORIG_BASE, main_dir)
+        dest_path = None
 
-        try:
-            shutil.copy2(src_path, dest_path)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to replace original:\n{e}")
-            return
+
+        for f in os.listdir(dest_dir):
+            if f.lower().startswith(file_name):
+                dest_path = os.path.join(dest_dir, f)
+                break
+        
+        print(f"Searching for original in: {os.path.dirname(src_path)} matching {dest_path}")
+        
+        if dest_path:
+            try:
+                shutil.copy2(dest_path, os.path.normpath((src_path)))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to replace original:\n{e}")
+                return
 
         messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
