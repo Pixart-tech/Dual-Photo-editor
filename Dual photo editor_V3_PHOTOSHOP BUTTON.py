@@ -29,8 +29,19 @@ def list_image_pairs(input_folder):
         for f in os.listdir(partial_dir)
         if f.lower().endswith(IMAGE_EXTS)
     }
+
     common = sorted(set(full_files.keys()) & set(partial_files.keys()))
-    return [(full_files[name], partial_files[name]) for name in common]
+
+    pairs = []
+    for name in common:
+        full_src = full_files[name]
+        partial_src = partial_files[name]
+        pairs.append((full_src, partial_src))
+
+    if not pairs:
+        messagebox.showinfo("No Images", "No matching image pairs were found.")
+
+    return pairs
 
 
 def _draw_guides(canvas, w, h, is_partial=False):
@@ -49,7 +60,13 @@ def _draw_guides(canvas, w, h, is_partial=False):
 
 class ImageEditorWidget(tk.Frame):
     def __init__(self, master, img_path, canvas_w, canvas_h):
-        super().__init__(master, bg="#2b2b2b", highlightthickness=4, highlightbackground="#2b2b2b")
+        super().__init__(
+            master,
+            bg="#2b2b2b",
+            highlightthickness=4,
+            highlightbackground="#2b2b2b",
+            highlightcolor="#2b2b2b",
+        )
         self.master = master
         self.img_path = img_path
         self.canvas_w = canvas_w
@@ -78,7 +95,14 @@ class ImageEditorWidget(tk.Frame):
         self.drawing = False
         self._stroke_changed = False
 
-        self.canvas = tk.Canvas(self, width=self.canvas_w, height=self.canvas_h, bg="#ddd", highlightthickness=0)
+        self.canvas = tk.Canvas(
+            self,
+            width=self.canvas_w,
+            height=self.canvas_h,
+            bg="#ddd",
+            highlightthickness=0,
+            takefocus=1,
+        )
         self.canvas.pack(padx=10, pady=10)
         self._tk_img = None
         self._cursor_id = None
@@ -91,6 +115,65 @@ class ImageEditorWidget(tk.Frame):
         self._render()
         self.refresh_mod_time()
         self._reset_history()
+
+    def export_state(self):
+        history_copy = []
+        for entry in self.history:
+            image_ref = entry["image"]
+            history_copy.append(
+                {
+                    "image": image_ref.copy() if image_ref is not None else None,
+                    "rotation": entry["rotation"],
+                    "zoom": entry["zoom"],
+                    "img_pos_x": entry["img_pos_x"],
+                    "img_pos_y": entry["img_pos_y"],
+                }
+            )
+        return {
+            "edit_pil": self.edit_pil.copy(),
+            "history": history_copy,
+            "history_index": self.history_index,
+            "saved_history_index": self.saved_history_index,
+            "zoom": self.zoom,
+            "img_pos_x": self.img_pos_x,
+            "img_pos_y": self.img_pos_y,
+            "rotation": self.rotation,
+            "brush_radius": self.brush_radius,
+            "dirty": self.dirty,
+            "last_mod_time": self.last_mod_time,
+        }
+
+    def restore_state(self, state):
+        if not state:
+            return
+        self.edit_pil = state["edit_pil"].copy()
+        self.history = []
+        for entry in state.get("history", []):
+            image_ref = entry.get("image")
+            self.history.append(
+                {
+                    "image": image_ref.copy() if image_ref is not None else None,
+                    "rotation": entry.get("rotation", 0.0),
+                    "zoom": entry.get("zoom", 1.0),
+                    "img_pos_x": entry.get("img_pos_x", 0),
+                    "img_pos_y": entry.get("img_pos_y", 0),
+                }
+            )
+        self.history_index = state.get("history_index", len(self.history) - 1)
+        self.saved_history_index = state.get("saved_history_index", -1)
+        self.zoom = state.get("zoom", 1.0)
+        self.img_pos_x = state.get("img_pos_x", 0)
+        self.img_pos_y = state.get("img_pos_y", 0)
+        self.rotation = state.get("rotation", 0.0)
+        self.brush_radius = state.get("brush_radius", self.brush_radius)
+        self.dirty = state.get("dirty", self.history_index != self.saved_history_index)
+        self.last_mod_time = state.get("last_mod_time", self.last_mod_time)
+        self._render()
+        self._update_dirty_state()
+
+    def set_focus_state(self, focused):
+        color = "#1e90ff" if focused else "#2b2b2b"
+        self.config(highlightbackground=color, highlightcolor=color)
 
     def _capture_state(self, copy_image=True):
         return {
@@ -119,6 +202,41 @@ class ImageEditorWidget(tk.Frame):
     def mark_saved(self):
         self.saved_history_index = self.history_index
         self._update_dirty_state()
+
+    def _save_as_jpeg(self, img, path):
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[3])
+        background.save(path, quality=95)
+
+    def _save_as_png(self, img, path):
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        img.save(path)
+
+    def save(self):
+        target_w, target_h = self.orig_pil.size
+        rotated = self.edit_pil.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
+        base_scale = min(target_w / rotated.width, target_h / rotated.height)
+        save_scale = base_scale * self.zoom
+        new_w = max(1, int(rotated.width * save_scale))
+        new_h = max(1, int(rotated.height * save_scale))
+        scaled = rotated.resize((new_w, new_h), Image.LANCZOS)
+        pan_x_img = int(self.img_pos_x * (target_w / self.canvas_w))
+        pan_y_img = int(self.img_pos_y * (target_h / self.canvas_h))
+        final = Image.new("RGBA", (target_w, target_h), (255, 255, 255, 0))
+        x = (target_w - new_w) // 2 + pan_x_img
+        y = (target_h - new_h) // 2 + pan_y_img
+        final.paste(scaled, (x, y), scaled)
+        ext = os.path.splitext(self.img_path)[1].lower()
+        if ext in (".jpg", ".jpeg"):
+            self._save_as_jpeg(final, self.img_path)
+        elif ext == ".png":
+            self._save_as_png(final, self.img_path)
+        else:
+            final.save(self.img_path)
+        self.refresh_mod_time()
 
     def _get_history_image(self, idx):
         for i in range(idx, -1, -1):
@@ -311,17 +429,17 @@ class DualEditor(tk.Tk):
 
         bar = tk.Frame(self, bg="#333")
         bar.pack(side="bottom", fill="x")
-        tk.Button(bar, text="← Prev", command=self.prev).pack(side="left", padx=6, pady=6)
-        tk.Button(bar, text="Undo (Ctrl+Z)", command=lambda: self._do("undo")).pack(side="left")
-        tk.Button(bar, text="Redo (Ctrl+Shift+Z)", command=lambda: self._do("redo")).pack(side="left")
-        tk.Button(bar, text="Open in Photoshop", bg="#ffcc66", command=self.open_in_photoshop).pack(side="left", padx=10)
-        tk.Button(bar, text="Locate Photoshop", bg="#ff9966", command=self.locate_photoshop).pack(side="left", padx=10)
+        tk.Button(bar, text="← Prev", command=self.prev, takefocus=False).pack(side="left", padx=6, pady=6)
+        tk.Button(bar, text="Undo (Ctrl+Z)", command=lambda: self._do("undo"), takefocus=False).pack(side="left")
+        tk.Button(bar, text="Redo (Ctrl+Shift+Z)", command=lambda: self._do("redo"), takefocus=False).pack(side="left")
+        tk.Button(bar, text="Open in Photoshop", bg="#ffcc66", command=self.open_in_photoshop, takefocus=False).pack(side="left", padx=10)
+        tk.Button(bar, text="Locate Photoshop", bg="#ff9966", command=self.locate_photoshop, takefocus=False).pack(side="left", padx=10)
 
         self.brush_label = tk.Label(bar, text="20", bg="#333", fg="white")
         self.brush_label.pack(side="left", padx=20)
-        tk.Button(bar, text="Save", bg="#9f9", command=self._save).pack(side="left")
-        tk.Button(bar, text="Replace Original", bg="#ff6666", command=self._replace_original).pack(side="left", padx=10)
-        tk.Button(bar, text="Next →", bg="#9ff", command=self.next).pack(side="right", padx=6)
+        tk.Button(bar, text="Save", bg="#9f9", command=self._save, takefocus=False).pack(side="left")
+        tk.Button(bar, text="Replace Original", bg="#ff6666", command=self._replace_original, takefocus=False).pack(side="left", padx=10)
+        tk.Button(bar, text="Next →", bg="#9ff", command=self.next, takefocus=False).pack(side="right", padx=6)
 
         # Shortcuts
         self.bind_all("<Control-z>", lambda e: self._do("undo"))
@@ -337,16 +455,20 @@ class DualEditor(tk.Tk):
             self._bind_edit_key(key, "zoom", 1.02)
         for key in ("-", "_", "<KP_Subtract>"):
             self._bind_edit_key(key, "zoom", 0.98)
-        self._bind_edit_key("/", "rotate", -5)
-        self._bind_edit_key("*", "rotate", 5)
+        self._bind_edit_key("/", "rotate", -3)
+        self._bind_edit_key("*", "rotate", 3)
         for k, dx, dy in [("<Left>", -2, 0), ("<Right>", 2, 0), ("<Up>", 0, -2), ("<Down>", 0, 2)]:
             self._bind_edit_key(k, "move", dx, dy)
 
-        self.bind_all("<Return>", lambda e: self.next())
-        self.bind_all("<KP_Enter>", lambda e: self.next())
+        self.bind_all("<Return>", self._handle_enter_press)
+        self.bind_all("<KP_Enter>", self._handle_enter_press)
         self.bind_all("<BackSpace>", lambda e: self.prev())
         self.bind_all("<Tab>", self._toggle_dashboard_focus)
-        self.bind_all("<ISO_Left_Tab>", self._toggle_dashboard_focus)
+        self.bind_all("<Shift-Tab>", self._toggle_dashboard_focus)
+        self.bind_all("<Shift-plus>", lambda e: self._do("zoom", 1.10))
+        self.bind_all("<Shift-KP_Add>", lambda e: self._do("zoom", 1.10))
+        self.bind_all("<Shift-minus>", lambda e: self._do("zoom", 0.90))
+        self.bind_all("<Shift-KP_Subtract>", lambda e: self._do("zoom", 0.90))
 
         self.bind("<FocusIn>", self._check_external_updates)
 
@@ -360,8 +482,10 @@ class DualEditor(tk.Tk):
         self.bind_all(sequence, handler)
 
     def _load(self, i):
-        if self.left: self.left.destroy()
-        if self.right: self.right.destroy()
+        for editor in (self.left, self.right):
+            self._cache_editor_state(editor)
+            if editor:
+                editor.destroy()
         self.left = None
         self.right = None
         lf, rt = self.pairs[i]
@@ -369,16 +493,18 @@ class DualEditor(tk.Tk):
         self.right = ImageEditorWidget(self, rt, 613, 713)
         self.left.pack(side="left", expand=True, padx=20, pady=20)
         self.right.pack(side="right", expand=True, padx=20, pady=20)
-        self.focus_editor(self.left)
+        self._restore_editor_state(self.left)
+        self._restore_editor_state(self.right)
+        self.focus_editor(self.left if self.left else self.right)
 
     def focus_editor(self, e):
         self.focused = e
-        if self.left == e:
-            self.left.config(highlightbackground="#1e90ff")
-            self.right.config(highlightbackground="#2b2b2b")
-        else:
-            self.right.config(highlightbackground="#1e90ff")
-            self.left.config(highlightbackground="#2b2b2b")
+        if self.left:
+            self.left.set_focus_state(self.left is e)
+        if self.right:
+            self.right.set_focus_state(self.right is e)
+        if not self.focused:
+            return
         self.update_brush_label(self.focused.brush_radius)
         if hasattr(self.focused, "canvas"):
             self.focused.canvas.focus_set()
@@ -419,15 +545,15 @@ class DualEditor(tk.Tk):
         if not (self.left and self.right):
             return False
         try:
-            self.left.edit_pil.save(self.left.img_path)
-            self.right.edit_pil.save(self.right.img_path)
-            self.left.refresh_mod_time()
-            self.right.refresh_mod_time()
+            self.left.save()
+            self.right.save()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save images:\n{e}")
             return False
         self.left.mark_saved()
         self.right.mark_saved()
+        self._cache_editor_state(self.left)
+        self._cache_editor_state(self.right)
         if show_popup:
             messagebox.showinfo("Saved", "Images saved successfully!")
         return True
@@ -437,18 +563,27 @@ class DualEditor(tk.Tk):
             ed and getattr(ed, "dirty", False) for ed in (self.left, self.right)
         )
 
-    def _prompt_save_if_needed(self):
+    def _prompt_save_if_needed(self, *, reason=None):
         if not self._has_unsaved_changes():
             return True
-        should_save = messagebox.askyesno(
-            "Unsaved Changes", "You have unsaved changes. Do you want to save before continuing?"
+        if reason == "enter":
+            prompt_message = (
+                "You pressed Enter without saving your latest edits.\n\n"
+                "Would you like to save them before moving to the next pair?"
+            )
+        else:
+            prompt_message = (
+                "You have unsaved edits. Press Ctrl+S or click the Save button to write them "
+                "before continuing.\n\nSave now?"
+            )
+        response = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            prompt_message,
         )
-        if should_save:
-            try:
-                return self._save(show_popup=False)
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save:\n{e}")
-                return False
+        if response is None:
+            return False
+        if response:
+            return self._save(show_popup=False)
         return True
 
     def _replace_original(self):
@@ -459,11 +594,16 @@ class DualEditor(tk.Tk):
         editor = self.focused
         src_path = editor.img_path
         try:
-            editor.edit_pil.save(src_path)
-            editor.refresh_mod_time()
+            editor.save()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save image before replacing original:\n{e}")
             return
+        
+        main_dir = os.path.basename(self.input_folder)
+        file_name = os.path.splitext(os.path.basename(src_path))[0]
+
+        """
+        dest_path = os.path.join(ORIG_BASE, main_dir)
 
         rel_path = None
         normalized_src = os.path.normpath(src_path)
@@ -474,6 +614,8 @@ class DualEditor(tk.Tk):
             try:
                 normalized_base = os.path.normpath(base)
                 common = os.path.commonpath([os.path.normcase(normalized_base), normalized_src_case])
+                
+                print(f"Checking base: {common} against {normalized_base}")
             except ValueError:
                 continue
             if common == os.path.normcase(normalized_base):
@@ -488,24 +630,36 @@ class DualEditor(tk.Tk):
 
         dest_path = os.path.join(ORIG_BASE, rel_path)
         dest_dir = os.path.dirname(dest_path)
-        try:
-            if dest_dir:
-                os.makedirs(dest_dir, exist_ok=True)
-        except OSError as e:
-            if not dest_dir or not os.path.isdir(dest_dir):
-                messagebox.showerror("Error", f"Could not access original folder:\n{e}")
-                return
+        
+        """
+        dest_dir = os.path.join(ORIG_BASE, main_dir)
+        dest_path = None
 
-        try:
-            shutil.copy2(src_path, dest_path)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to replace original:\n{e}")
-            return
+
+        for f in os.listdir(dest_dir):
+            if f.lower().startswith(file_name):
+                dest_path = os.path.join(dest_dir, f)
+                break
+        
+        print(f"Searching for original in: {os.path.dirname(src_path)} matching {dest_path}")
+        
+        if dest_path:
+            try:
+                shutil.copy2(dest_path, os.path.normpath((src_path)))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to replace original:\n{e}")
+                return
 
         messagebox.showinfo("Replace Original", f"Copied to:\n{dest_path}")
 
-    def next(self):
-        if not self._prompt_save_if_needed():
+    def _handle_enter_press(self, event=None):
+        if not self._prompt_save_if_needed(reason="enter"):
+            return "break"
+        self.next(prompt=False)
+        return "break"
+
+    def next(self, event=None, *, prompt=True):
+        if prompt and not self._prompt_save_if_needed():
             return
         self.index += 1
         if self.index >= len(self.pairs): self.destroy(); return
@@ -565,6 +719,27 @@ class DualEditor(tk.Tk):
             if editor:
                 editor.check_external_update()
 
+    def _cache_editor_state(self, editor):
+        if not editor or not getattr(editor, "img_path", None):
+            return
+        try:
+            self._editor_states[editor.img_path] = editor.export_state()
+        except Exception as exc:
+            print(f"Failed to cache editor state for {editor.img_path}: {exc}")
+
+    def _restore_editor_state(self, editor):
+        if not editor or not getattr(editor, "img_path", None):
+            return
+        state = self._editor_states.get(editor.img_path)
+        if state:
+            try:
+                editor.restore_state(state)
+            except Exception as exc:
+                print(f"Failed to restore editor state for {editor.img_path}: {exc}")
+
+    def clear_cached_state(self, path):
+        self._editor_states.pop(path, None)
+
 
 def main():
     root = tk.Tk()
@@ -581,3 +756,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
